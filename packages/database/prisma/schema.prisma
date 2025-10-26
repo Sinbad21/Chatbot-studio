@@ -1,0 +1,550 @@
+// Chatbot Studio - Complete Database Schema
+// 23 Tables for Multi-Tenant SaaS Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 1. USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String
+  avatar        String?
+  role          UserRole @default(USER)
+  emailVerified Boolean  @default(false)
+  onboarded     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  organizations OrganizationMember[]
+  bots          Bot[]
+  conversations Conversation[]
+  messages      Message[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  apiKeys       ApiKey[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+// ============================================
+// 2. ORGANIZATION (Multi-Tenant)
+// ============================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logo      String?
+  plan      String   @default("free")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  members        OrganizationMember[]
+  bots           Bot[]
+  subscriptions  Subscription[]
+  payments       Payment[]
+  leadCampaigns  LeadCampaign[]
+  integrations   IntegrationConfig[]
+  apiKeys        ApiKey[]
+  auditLogs      AuditLog[]
+
+  @@index([slug])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           MemberRole
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ============================================
+// 3. BOT & CONVERSATIONS
+// ============================================
+
+model Bot {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  avatar         String?
+  organizationId String
+  userId         String
+  published      Boolean  @default(false)
+  systemPrompt   String   @default("You are a helpful AI assistant.")
+  welcomeMessage String   @default("Hello! How can I help you?")
+  color          String   @default("#6366f1")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  creator       User           @relation(fields: [userId], references: [id])
+  conversations Conversation[]
+  documents     Document[]
+  intents       Intent[]
+  faqs          FAQ[]
+  analytics     Analytics[]
+
+  @@index([organizationId])
+  @@index([userId])
+  @@map("bots")
+}
+
+model Conversation {
+  id        String   @id @default(cuid())
+  botId     String
+  userId    String?
+  sessionId String
+  source    String   @default("widget")
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bot      Bot       @relation(fields: [botId], references: [id], onDelete: Cascade)
+  user     User?     @relation(fields: [userId], references: [id])
+  messages Message[]
+  lead     Lead?
+
+  @@index([botId])
+  @@index([sessionId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  content        String
+  role           MessageRole
+  userId         String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  // Relations
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// ============================================
+// 4. DOCUMENTS & KNOWLEDGE BASE
+// ============================================
+
+model Document {
+  id        String   @id @default(cuid())
+  botId     String
+  name      String
+  type      String
+  size      Int
+  url       String
+  content   String   @db.Text
+  status    DocumentStatus @default(PROCESSING)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId])
+  @@map("documents")
+}
+
+enum DocumentStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// 5. INTENTS & FAQ
+// ============================================
+
+model Intent {
+  id        String   @id @default(cuid())
+  botId     String
+  name      String
+  patterns  String[]
+  response  String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId])
+  @@map("intents")
+}
+
+model FAQ {
+  id        String   @id @default(cuid())
+  botId     String
+  question  String
+  answer    String
+  category  String?
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@index([botId])
+  @@map("faqs")
+}
+
+// ============================================
+// 6. LEAD SCRAPING
+// ============================================
+
+model Lead {
+  id             String   @id @default(cuid())
+  conversationId String   @unique
+  campaignId     String?
+  name           String?
+  email          String?
+  phone          String?
+  company        String?
+  metadata       Json?
+  score          Int      @default(0)
+  status         LeadStatus @default(NEW)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  conversation Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  campaign     LeadCampaign?  @relation(fields: [campaignId], references: [id])
+
+  @@index([campaignId])
+  @@index([email])
+  @@map("leads")
+}
+
+model LeadCampaign {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  creditsUsed    Int      @default(0)
+  creditsLimit   Int      @default(100)
+  status         CampaignStatus @default(ACTIVE)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  leads        Lead[]
+
+  @@index([organizationId])
+  @@map("lead_campaigns")
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+enum CampaignStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+// ============================================
+// 7. BILLING & SUBSCRIPTIONS
+// ============================================
+
+model Subscription {
+  id             String   @id @default(cuid())
+  organizationId String
+  planId         String
+  status         SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean @default(false)
+  stripeSubscriptionId String? @unique
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [planId], references: [id])
+
+  @@index([organizationId])
+  @@map("subscriptions")
+}
+
+model Plan {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  price         Float
+  interval      String   @default("month")
+  features      Json
+  maxBots       Int      @default(1)
+  maxConversations Int   @default(1000)
+  stripePriceId String?  @unique
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Payment {
+  id             String   @id @default(cuid())
+  organizationId String
+  amount         Float
+  currency       String   @default("usd")
+  status         PaymentStatus
+  stripePaymentId String? @unique
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("payments")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  TRIALING
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+// ============================================
+// 8. INTEGRATIONS
+// ============================================
+
+model Integration {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  icon        String?
+  category    String
+  config      Json
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  configurations IntegrationConfig[]
+
+  @@map("integrations")
+}
+
+model IntegrationConfig {
+  id             String   @id @default(cuid())
+  organizationId String
+  integrationId  String
+  config         Json
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  integration  Integration  @relation(fields: [integrationId], references: [id])
+
+  @@unique([organizationId, integrationId])
+  @@index([organizationId])
+  @@map("integration_configs")
+}
+
+// ============================================
+// 9. NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType
+  read      Boolean  @default(false)
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+// ============================================
+// 10. MARKETPLACE TEMPLATES
+// ============================================
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  category    String
+  config      Json
+  preview     String?
+  downloads   Int      @default(0)
+  rating      Float    @default(0)
+  published   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([published])
+  @@map("templates")
+}
+
+// ============================================
+// 11. ANALYTICS
+// ============================================
+
+model Analytics {
+  id        String   @id @default(cuid())
+  botId     String
+  date      DateTime
+  metric    String
+  value     Float
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  // Relations
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Cascade)
+
+  @@unique([botId, date, metric])
+  @@index([botId])
+  @@index([date])
+  @@map("analytics")
+}
+
+// ============================================
+// 12. AUDIT LOGS
+// ============================================
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  action         String
+  resource       String
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// 13. API KEYS
+// ============================================
+
+model ApiKey {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  name           String
+  key            String   @unique
+  lastUsed       DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([key])
+  @@map("api_keys")
+}
